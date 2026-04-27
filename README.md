@@ -1,8 +1,6 @@
-# Bone Healing Agent-Based Model (ABM)
+# IMMUNO-BONE: Bone Healing Agent-Based Model (ABM)
 
-This is a repository for a code based IMMUNO-BONE model
-
-An agent-based model of the early inflammatory and regenerative phases of bone fracture healing. The model simulates spatial interactions among key cell populations — neutrophils (PMN), macrophages (M0/M1/M2), mesenchymal stem cells (MSC), and endothelial cells (EC) — along with pro- and anti-inflammatory cytokines, across a finite-element mesh derived from a bone callus geometry.
+This repository contains the full implementation of the IMMUNO-BONE model — an agent-based simulation of the early inflammatory and regenerative phases of bone fracture healing. The model captures spatial interactions among key cell populations (neutrophils, macrophages M0/M1/M2, mesenchymal stem cells, and endothelial cells) and pro- and anti-inflammatory cytokines, distributed across a finite-element mesh of the bone callus geometry.
 
 ---
 
