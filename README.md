@@ -1,5 +1,7 @@
 # Bone Healing Agent-Based Model (ABM)
 
+This is a repository for a code based IMMUNO-BONE model
+
 An agent-based model of the early inflammatory and regenerative phases of bone fracture healing. The model simulates spatial interactions among key cell populations — neutrophils (PMN), macrophages (M0/M1/M2), mesenchymal stem cells (MSC), and endothelial cells (EC) — along with pro- and anti-inflammatory cytokines, across a finite-element mesh derived from a bone callus geometry.
 
 ---
@@ -39,8 +41,8 @@ An agent-based model of the early inflammatory and regenerative phases of bone f
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
-cd <repository-folder>
+git clone https://github.com/ahedayat99/IMMUNO-BONE.git
+cd IMMUNO-BONE
 ```
 
 ### 2. Create and activate the conda environment
@@ -82,13 +84,6 @@ python scripts/simple_domain_modular_v1.py \
     --verbose
 ```
 
-### Run with default (hard-coded) parameters
-
-```bash
-python scripts/simple_domain_modular_v1.py \
-    --node data/node_elements.txt \
-    --output_csv output/output.csv
-```
 
 ### Command-line arguments
 
@@ -111,19 +106,6 @@ An Abaqus-format mesh file defining the 2D callus geometry. Contains node coordi
 
 A JSON dictionary of calibrated kinetic and rate parameters governing cell recruitment, polarization, apoptosis, and cytokine production/degradation. If omitted, the model uses the built-in default parameters defined in `simple_domain_modular_v1.py`.
 
-Key parameter groups:
-
-| Prefix | Description |
-|---|---|
-| `k_e*` | Emigration rates (PMN, M0, M1, M2) |
-| `k12`, `k21` | Macrophage M1↔M2 polarization rates |
-| `d0`, `d1`, `d2` | Macrophage apoptosis rates |
-| `k0`–`k9` | Cytokine production rates |
-| `d_c1`–`d_c4` | Cytokine degradation rates |
-| `diff_c*` | Cytokine diffusion coefficients |
-| `init_*` | Optional: initial cell/cytokine concentrations |
-
----
 
 ## Output
 
@@ -149,12 +131,6 @@ The simulation runs for **120 hours** and writes one row per hour to the output 
 
 ---
 
-## Customizing Parameters
-
-To run with custom parameters, copy `data/input_params.json`, modify the values, and pass the new file via `--params_json`. The parameter file must contain **all required keys** (matching the default set in `simple_domain_modular_v1.py`). Optional initial-condition keys (`init_M0`, `init_PMN_agents`, etc.) may be omitted and will use defaults.
-
----
-
 ## Citation
 
 If you use this model in your research, please cite:
@@ -162,7 +138,3 @@ If you use this model in your research, please cite:
 > [Paper citation — to be added upon publication]
 
 ---
-
-## License
-
-To be determined upon publication.
