@@ -1,13 +1,34 @@
-IMMUNO-BONE: A Multi-scale Computational Framework to Simulate the Immune-mediated Inflammatory Response in Murine Early Bone Fracture Healing
-
-
-Ahmad Hedayatzadeh Razavi, M.Sc.1,2, Elizabeth Vickery, B.S.1, Mohammad Hemmati, M.S.3, Prateek Misra, M.D.1, Nazanin Nafisi, M.S.1,2, Alireza Mirahmadi, M.D.1, Mohammad Javad Shariyati, M.D.1, Edward K. Rodriguez, M.D., Ph.D.1, Ara Nazarian Ph.D.1,2,4
-
-
-1	Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School, Boston, MA, USA
-2 Department of Mechanical Engineering, Boston University, Boston, MA, USA
-3 Mathematics Department, University of Massachusetts, Boston, MA, USA
-4 Department of Orthopaedic Surgery, Yerevan State Medical University, Yerevan, Armenia
-
-
-This repository contains the full implementation of the IMMUNO-BONE model — an agent-based simulation of the early inflammatory and regenerative phases of bone fracture healing. The model captures spatial interactions among key cell populations (neutrophils, macrophages M0/M1/M2, mesenchymal stem cells, and endothelial cells) and pro- and anti-inflammatory cytokines, distributed across a finite-element mesh of the bone callus geometry.
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "IMMUNO-BONE: A Multi-scale Computational Framework to Simulate the Immune-mediated Inflammatory Response in Murine Early Bone Fracture Healing"
+version: v1.0.0
+date-released: 2026-07-25
+authors:
+  - family-names: "Hedayatzadeh Razavi"
+    given-names: "Ahmad"
+    orcid: "https://orcid.org/0009-0004-0859-3338"
+    affiliation: "Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School; Department of Mechanical Engineering, Boston University"
+  - family-names: "Vickery"
+    given-names: "Elizabeth"
+    affiliation: "Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School"
+  - family-names: "Hemmati"
+    given-names: "Mohammad"
+    affiliation: "Mathematics Department, University of Massachusetts, Boston"
+  - family-names: "Misra"
+    given-names: "Prateek"
+    affiliation: "Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School"
+  - family-names: "Nafisi"
+    given-names: "Nazanin"
+    affiliation: "Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School; Department of Mechanical Engineering, Boston University"
+  - family-names: "Mirahmadi"
+    given-names: "Alireza"
+    affiliation: "Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School"
+  - family-names: "Shariyati"
+    given-names: "Mohammad Javad"
+    affiliation: "Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School"
+  - family-names: "Rodriguez"
+    given-names: "Edward K."
+    affiliation: "Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School"
+  - family-names: "Nazarian"
+    given-names: "Ara"
+    affiliation: "Musculoskeletal Translational Innovation Initiative, Carl J. Shapiro Department of Orthopaedic Surgery, Beth Israel Deaconess Medical Center, Harvard Medical School; Department of Mechanical Engineering, Boston University; Department of Orthopaedic Surgery, Yerevan State Medical University"
