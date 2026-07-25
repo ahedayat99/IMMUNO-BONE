@@ -132,7 +132,8 @@ The simulation runs for **120 hours** and writes one row per hour to the output 
 ## Citation
 
 If you use this model in your research, please cite:
+DOI: 10.5281/zenodo.21567254
 
-> [Paper citation — to be added upon publication]
+> To be added upon publication.
 
 ---
