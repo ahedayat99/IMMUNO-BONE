@@ -46,6 +46,7 @@ This repository contains the full implementation of the IMMUNO-BONE model — a 
 ├── scc/                           # Batch scripts for the Boston University SCC cluster (SGE)
 ├── tests/golden/                  # Reference records for regression checks
 ├── environment.yml                # Conda environment specification
+├── LICENSE                        # MIT License
 └── README.md
 ```
 
@@ -159,3 +160,9 @@ If you use this model in your research, please cite the software (all versions, 
 DOI: 10.5281/zenodo.21567254
 
 > Article citation to be added upon publication.
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE). Copyright (c) 2026 Ahmad Hedayatzadeh Razavi and the Musculoskeletal Translational Innovation Initiative (MTII).

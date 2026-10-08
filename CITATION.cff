@@ -5,6 +5,7 @@ version: v2.0.0
 date-released: 2026-10-07
 doi: 10.5281/zenodo.21567254
 repository-code: "https://github.com/ahedayat99/IMMUNO-BONE"
+license: MIT
 authors:
   - family-names: "Hedayatzadeh Razavi"
     given-names: "Ahmad"
