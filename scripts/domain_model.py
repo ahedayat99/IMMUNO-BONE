@@ -3,29 +3,33 @@ DomainModel class for bone healing simulation using element-based geometry.
 """
 
 import numpy as np
-import random
 from pathlib import Path
 from mesa import Model
-from mesa.time import SimultaneousActivation
+from mesa.time import RandomActivation
 
-#from element_agent import ElementAgent
 from endothelial_cell_agent import EndothelialCellAgent
-#from bone_healing_model import full_bone_healing_model
 
 from element_agent_optimized import ElementAgent
-from bone_healing_model_optimized import full_bone_healing_model
+from mesh import MeshGeometry
+from reaction import react_element, decay_unoccupied, production_rates
+from bone_healing_model_optimized import hypoxia_regulation
+from parameters import DT_HOURS
 
 
 class DomainModel(Model):
-    def __init__(self, nodes, elements, params):
+    def __init__(self, nodes, elements, params, seed=None):
         """
         Initialize the DomainModel using an element-based geometry.
         :param nodes: Dictionary of nodes with their coordinates.
         :param elements: Dictionary of elements with their node IDs.
         :param params: Model parameters for the bone healing equations.
+        :param seed: Seed for the model's random number generator (self.random).
+                     All stochastic choices draw from self.random, so a given seed
+                     reproduces a run exactly. Mesa reads it in Model.__new__.
         """
         super().__init__()
-        self.schedule = SimultaneousActivation(self)
+        # Parcels are activated in a fresh random order every step (seeded through self.random)
+        self.schedule = RandomActivation(self)
         self.nodes = nodes
         self.elements = elements
         self.params = params
@@ -48,6 +52,12 @@ class DomainModel(Model):
             for element_id, node_ids in elements.items()
         }
         self.coord_to_element = {(int(x), int(y)): eid for eid, (x, y) in self.element_centroids.items()}
+
+        # Mesh geometry: element areas, edge adjacency, finite-volume transport operator
+        self.geometry = MeshGeometry(nodes, elements)
+        self.area_ratio = dict(zip(self.geometry.ids, self.geometry.area_ratio))
+        self.max_parcels = int(self.params.get("max_parcels_per_element", 3))
+        self.n_clipped = 0
 
         # Initialize debris field
         self.debris_field = {}
@@ -101,8 +111,8 @@ class DomainModel(Model):
 
         self._initialize_agents()
 
-        # Pre-calculate neighbor relationships for O(1) lookup instead of O(N) iteration
-        self.neighbor_cache = self._build_neighbor_cache()
+        # Neighbours are elements sharing an edge (not merely a corner node)
+        self.neighbor_cache = self.geometry.neighbors
 
     def snapshot_outputs(self):
         """Capture current state for validation or analysis."""
@@ -115,8 +125,6 @@ class DomainModel(Model):
             "EC": 0
         }
 
-        totals = {"c1": 0.0, "c2": 0.0, "c3": 0.0, "c4": 0.0}
-
         for a in self.schedule.agents:
             if isinstance(a, ElementAgent):
                 counts["PMN"] += a.state[0]
@@ -124,37 +132,11 @@ class DomainModel(Model):
                 counts["M1"] += a.state[2]
                 counts["M2"] += a.state[3]
                 counts["MSC"] += a.state[7]
-
-                totals["c1"] += a.state[4]
-                totals["c2"] += a.state[5]
-                totals["c3"] += a.state[6]
-                totals["c4"] += a.state[8]
-
             elif isinstance(a, EndothelialCellAgent):
                 counts["EC"] += 1
 
+        totals = self.cytokine_amounts()
         return {"counts": counts, "cytokines": totals}
-
-    def _build_neighbor_cache(self):
-        """
-        Pre-calculate all neighbor relationships once during initialization.
-        This is much faster than computing neighbors on-the-fly every time.
-
-        :return: Dictionary mapping element_id -> list of neighbor element_ids
-        """
-        neighbor_cache = {}
-
-        for element_id, node_ids in self.elements.items():
-            neighbors = set()
-            current_nodes = set(node_ids)
-
-            for other_element, other_nodes in self.elements.items():
-                if element_id != other_element and current_nodes.intersection(other_nodes):
-                    neighbors.add(other_element)
-
-            neighbor_cache[element_id] = list(neighbors)
-
-        return neighbor_cache
 
     def is_closed_loop(self, path, tol=0.1):
         """Check if a vessel path forms a closed loop."""
@@ -163,6 +145,12 @@ class DomainModel(Model):
         x0, y0 = path[0]
         x1, y1 = path[-1]
         return np.linalg.norm(np.array([x0, y0]) - np.array([x1, y1])) < tol
+
+    def remove_parcel(self, agent):
+        """Retire a parcel: remove it from the scheduler and from its element's occupancy list."""
+        if agent in self.element_agents[agent.element_id]:
+            self.element_agents[agent.element_id].remove(agent)
+        self.schedule.remove(agent)
 
     def move_agent_to(self, agent, target_element):
         """Move an agent to a new element and update references."""
@@ -233,8 +221,31 @@ class DomainModel(Model):
             self.element_agents[element_id].append(agent)
 
         # Add MSC agents
-        half_num_cm_agents = num_cm_agents // 2
         msc_counter = 0
+        # Layout 0 (v1.0.1): two parcels of 5 cell-equivalents at the outer margin of the gap.
+        # Layout 1: the same total progenitor amount distributed over parcels in the periosteal
+        # cambium layer along the trans-cortex surface (first 0.3 mm of callus, |y| > 1 mm).
+        # Layout 2: half of the total in the periosteal cambium layer, half in the two gap parcels
+        # (periosteal and marrow-side progenitor sources); total amount unchanged.
+        layout = int(self.params.get("init_MSC_layout", 0))
+        gap_amount = 5.0 if layout != 2 else 2.5
+        if layout in (1, 2):
+            total_msc = 5.0 * num_cm_agents * (1.0 if layout == 1 else 0.5)
+            n_parcels = int(self.params.get("init_MSC_periosteal_parcels", 10))
+            cambium = [eid for eid, (x, y) in self.element_centroids.items()
+                       if 1.88 <= x <= 2.18 and 1.0 < abs(y) <= 10.0]
+            for element_id in self.random.sample(cambium, n_parcels):
+                c = self.cytokine_fields
+                initial_conditions = [0, 0, 0, 0, c["c1"][element_id], c["c2"][element_id],
+                                      c["c3"][element_id], total_msc / n_parcels, c["c4"][element_id]]
+                agent = ElementAgent(f"MSC-{msc_counter}", self, initial_conditions, self.params,
+                                     element_id, self.element_centroids[element_id])
+                self.schedule.add(agent)
+                self.element_agents[element_id].append(agent)
+                msc_counter += 1
+            if layout == 1:
+                num_cm_agents = 0
+        half_num_cm_agents = num_cm_agents // 2
 
         # Group 1: MSCs in range (-3, 0)
         for k in range(half_num_cm_agents):
@@ -250,7 +261,7 @@ class DomainModel(Model):
                 self.cytokine_fields["c1"][element_id],
                 self.cytokine_fields["c2"][element_id],
                 self.cytokine_fields["c3"][element_id],
-                5,
+                gap_amount,
                 self.cytokine_fields["c4"][element_id],
             ]
             agent = ElementAgent(f"MSC-{msc_counter}", self, initial_conditions, self.params, element_id, centroid)
@@ -269,7 +280,7 @@ class DomainModel(Model):
                     eligible_elements.append((element_id, centroid))
 
             num_to_select = int(0.7 * len(eligible_elements))
-            selected_elements = random.sample(eligible_elements, num_to_select)
+            selected_elements = self.random.sample(eligible_elements, num_to_select)
 
             for element_id, centroid in selected_elements:
                 ec_agent = EndothelialCellAgent(f"EC-{ec_counter}", self, element_id, centroid)
@@ -291,7 +302,7 @@ class DomainModel(Model):
                 self.cytokine_fields["c1"][element_id],
                 self.cytokine_fields["c2"][element_id],
                 self.cytokine_fields["c3"][element_id],
-                5,
+                gap_amount,
                 self.cytokine_fields["c4"][element_id],
             ]
             agent = ElementAgent(f"MSC-{msc_counter}", self, initial_conditions, self.params, element_id, centroid)
@@ -333,7 +344,7 @@ class DomainModel(Model):
 
         visited.add(element_id)
 
-        if len(self.element_agents[element_id]) < 3:
+        if len(self.element_agents[element_id]) < self.max_parcels:
             return element_id
 
         if depth_limit <= 0:
@@ -409,128 +420,113 @@ class DomainModel(Model):
 
         self.oxygen_field = diffused_oxygen
 
-    def update_cytokine_fields(self):
-        """Update the cytokine fields based on the agents' states."""
-        for cytokine in self.cytokine_fields:
-            for element_id in self.cytokine_fields[cytokine]:
-                self.cytokine_fields[cytokine][element_id] = 0.0
+    # ------------------------------------------------------------------
+    # Continuous updates (Box 1, steps 1-3)
+    # ------------------------------------------------------------------
+    CYTOKINES = ("c1", "c2", "c3", "c4")
+    CELL_INDEX = [0, 1, 2, 3, 7]        # PMN, M0, M1, M2, MSC in ElementAgent.state
+    FIELD_INDEX = [4, 5, 6, 8]          # c1, c2, c3, c4 mirrored in ElementAgent.state
 
-        for agent in self.schedule.agents:
-            if not isinstance(agent, ElementAgent):
+    def cytokine_amounts(self):
+        """Domain amount of each cytokine, sum_e a_e * c_e (in mean-element units); matches bulk dPCR."""
+        return {c: float(sum(self.area_ratio[e] * v for e, v in self.cytokine_fields[c].items()))
+                for c in self.CYTOKINES}
+
+    def cytokine_production(self):
+        """Domain secretion rate of each cytokine (amount per hour), summed over occupied elements."""
+        by_element = {}
+        for a in self.schedule.agents:
+            if isinstance(a, ElementAgent):
+                by_element.setdefault(a.element_id, []).append(a)
+        total = np.zeros(4)
+        for eid, parcels in by_element.items():
+            fields = np.array([self.debris_field[eid]] + [self.cytokine_fields[k][eid] for k in self.CYTOKINES])
+            cells = np.array([a.state[self.CELL_INDEX] for a in parcels], dtype=float)
+            total += production_rates(fields, cells, self.params, self.area_ratio[eid],
+                                      hypoxia_regulation(self.oxygen_field[eid]))
+        return dict(zip(self.CYTOKINES, total.tolist()))
+
+    def react(self, dt=DT_HOURS):
+        """Element-local reaction step: parcels + cytokines + debris of each element integrated together."""
+        by_element = {}
+        for a in self.schedule.agents:
+            if isinstance(a, ElementAgent):
+                by_element.setdefault(a.element_id, []).append(a)
+
+        for eid in self.elements:
+            c = np.array([self.cytokine_fields[k][eid] for k in self.CYTOKINES])
+            parcels = by_element.get(eid)
+            if not parcels:
+                new_c = decay_unoccupied(c, self.params, dt)
+                for k, v in zip(self.CYTOKINES, new_c):
+                    self.cytokine_fields[k][eid] = float(v)
                 continue
-            element_id = agent.element_id
-            self.cytokine_fields["c1"][element_id] += agent.state[4]
-            self.cytokine_fields["c2"][element_id] += agent.state[5]
-            self.cytokine_fields["c3"][element_id] += agent.state[6]
-            self.cytokine_fields["c4"][element_id] += agent.state[8]
+            fields = np.concatenate([[self.debris_field[eid]], c])
+            cells = np.array([a.state[self.CELL_INDEX] for a in parcels], dtype=float)
+            new_fields, new_cells, clipped = react_element(
+                fields, cells, self.params, self.area_ratio[eid],
+                EC=self.element_EC_counts.get(eid, 0), PO2=self.oxygen_field[eid], dt=dt)
+            self.n_clipped += clipped
+            self.debris_field[eid] = float(new_fields[0])
+            for k, v in zip(self.CYTOKINES, new_fields[1:]):
+                self.cytokine_fields[k][eid] = float(v)
+            for a, row in zip(parcels, new_cells):
+                a.state = a.state.astype(float)
+                a.state[self.CELL_INDEX] = row
 
-    def update_debris_field(self):
-        """Update the debris field based on agent interactions."""
-        updated_debris_field = self.debris_field.copy()
+    def transport(self, dt=DT_HOURS):
+        """Finite-volume diffusion of each cytokine over the edge graph (mass-conserving, zero-flux)."""
+        ids = self.geometry.ids
+        for k in self.CYTOKINES:
+            arr = np.array([self.cytokine_fields[k][e] for e in ids])
+            arr = self.geometry.diffuse(arr, float(self.params[f"diff_{k}"]), dt)
+            self.cytokine_fields[k] = dict(zip(ids, arr.tolist()))
 
-        for agent in self.schedule.agents:
-            if not isinstance(agent, ElementAgent):
+    def mirror_fields_to_parcels(self):
+        """Keep the cytokine slots of each parcel's state equal to its element's field (read-only copy)."""
+        for a in self.schedule.agents:
+            if isinstance(a, ElementAgent):
+                for idx, k in zip(self.FIELD_INDEX, self.CYTOKINES):
+                    a.state[idx] = self.cytokine_fields[k][a.element_id]
+
+    # ------------------------------------------------------------------
+    # Chemotaxis (Box 1, step 4; Methods 5.5)
+    # ------------------------------------------------------------------
+    def migrate_parcels(self):
+        """
+        Composition-weighted chemotaxis. Each parcel weights the debris, TNF-a, IL-10, TGF-b and VEGF
+        fields by its own composition (PMN/M0 -> debris, M1 -> TNF-a, M2 -> IL-10, MSC -> TGF-b and VEGF),
+        scores the current element and every edge neighbour with free capacity by the weighted change in
+        max-normalised fields, and moves to a candidate drawn from a softmax with temperature tau.
+        """
+        beta_N = float(self.params.get("chemotaxis_beta_N", 0.6))
+        beta_0 = float(self.params.get("chemotaxis_beta_0", 1.0))
+        tau = float(self.params.get("chemotaxis_tau", 0.05))
+
+        def normalised(field):
+            m = max(field.values())
+            return {e: (v / m if m > 0 else 0.0) for e, v in field.items()}
+
+        phi = {"D": normalised(self.debris_field)}
+        for k in self.CYTOKINES:
+            phi[k] = normalised(self.cytokine_fields[k])
+
+        parcels = [a for a in self.schedule.agents if isinstance(a, ElementAgent)]
+        self.random.shuffle(parcels)
+        for a in parcels:
+            N, M0, M1, M2, C = (a.state[i] for i in self.CELL_INDEX)
+            Y = N + M0 + M1 + M2 + C
+            if Y <= 0:
                 continue
-            element_id = agent.element_id
-            if updated_debris_field[element_id] > 0:
-                D = updated_debris_field[element_id]
-                M0, M1, M2, PMN = agent.state[1], agent.state[2], agent.state[3], agent.state[0]
-                R_D = D / (self.params["a_ed"] + D)
-                debris_consumed = R_D * (5 * self.params["k_e0"] * M0 +
-                                         3 * self.params["k_e1"] * M1 +
-                                         2 * self.params["k_e2"] * M2 +
-                                         10 * self.params["k_e_pmn"] * PMN)
-                updated_debris_field[element_id] = max(0, updated_debris_field[element_id] - debris_consumed)
-
-        self.debris_field = updated_debris_field
-
-    def diffuse_cytokines(self):
-        """Diffuse cytokines across the element-based domain with exponential decay."""
-        updated_fields = {cytokine: {element_id: 0 for element_id in self.elements.keys()}
-                          for cytokine in ["c1", "c2", "c3", "c4"]}
-
-        for agent in self.schedule.agents:
-            if not isinstance(agent, ElementAgent):
-                continue
-            element_id = agent.element_id
-            updated_fields["c1"][element_id] += agent.state[4]
-            updated_fields["c2"][element_id] += agent.state[5]
-            updated_fields["c3"][element_id] += agent.state[6]
-            self.cytokine_fields["c4"][element_id] += agent.state[8]
-
-        for cytokine, field in self.cytokine_fields.items():
-            diff_field = field.copy()
-
-            for element_id, value in field.items():
-                neighbors = self.get_neighbors(element_id)
-                centroid = self.element_centroids[element_id]
-
-                for neighbor in neighbors:
-                    neighbor_centroid = self.element_centroids[neighbor]
-                    distance = np.linalg.norm(np.array(centroid) - np.array(neighbor_centroid))
-                    decay_factor = np.exp(-distance)
-
-                    diffusion = self.params[f"diff_{cytokine}"] * decay_factor * (value - field[neighbor])
-                    if diffusion > 0:
-                        diff_field[neighbor] += diffusion
-                        diff_field[element_id] -= diffusion
-
-            diff_field = {element_id: max(0, concentration) for element_id, concentration in diff_field.items()}
-            updated_fields[cytokine] = diff_field
-
-        self.cytokine_fields = updated_fields
-
-        for agent in self.schedule.agents:
-            element_id = agent.element_id
-            agent.state[4] = self.cytokine_fields["c1"][element_id]
-            agent.state[5] = self.cytokine_fields["c2"][element_id]
-            agent.state[6] = self.cytokine_fields["c3"][element_id]
-            agent.state[8] = self.cytokine_fields["c4"][element_id]
-
-    def perform_migration(self):
-        """Perform migration based on cytokine and debris gradients."""
-        gradients = {cytokine: {} for cytokine in ["debris", "c1", "c2", "c3", "c4"]}
-        for element_id, value in self.debris_field.items():
-            neighbors = self.get_neighbors(element_id)
-            gradients["debris"][element_id] = sum(self.debris_field[neighbor] - value for neighbor in neighbors)
-
-        for cytokine in ["c1", "c2", "c3", "c4"]:
-            for element_id, value in self.cytokine_fields[cytokine].items():
-                neighbors = self.get_neighbors(element_id)
-                gradients[cytokine][element_id] = sum(self.cytokine_fields[cytokine][neighbor] - value
-                                                      for neighbor in neighbors)
-
-        for agent in self.schedule.agents:
-            if not isinstance(agent, ElementAgent):
-                continue
-            curr_element_id = agent.element_id
-
-            weighted_gradients = {
-                "debris": agent.state[0] * 0.6 + agent.state[1] * 1.0,
-                "c1": agent.state[2] * 1.0,
-                "c2": agent.state[3] * 1.0,
-                "c3": agent.state[7] * 1.0,
-                "c4": agent.state[7] * 1.0,
-            }
-
-            max_gradient_element = None
-            max_gradient_value = float("-inf")
-
-            for neighbor in self.get_neighbors(curr_element_id):
-                gradient_value = (
-                    weighted_gradients["debris"] * gradients["debris"].get(neighbor, 0) +
-                    weighted_gradients["c1"] * gradients["c1"].get(neighbor, 0) +
-                    weighted_gradients["c2"] * gradients["c2"].get(neighbor, 0) +
-                    weighted_gradients["c3"] * gradients["c3"].get(neighbor, 0) +
-                    weighted_gradients["c4"] * gradients["c4"].get(neighbor, 0)
-                )
-
-                if gradient_value > max_gradient_value:
-                    max_gradient_value = gradient_value
-                    max_gradient_element = neighbor
-
-            if max_gradient_element is not None and max_gradient_element != curr_element_id:
-                agent.migrate(max_gradient_element)
+            w = {"D": (beta_N * N + beta_0 * M0) / Y, "c1": M1 / Y, "c2": M2 / Y, "c3": C / Y, "c4": C / Y}
+            here = a.element_id
+            candidates = [here] + [j for j in self.get_neighbors(here)
+                                   if len(self.element_agents[j]) < self.max_parcels]
+            scores = np.array([sum(w[s] * (phi[s][j] - phi[s][here]) for s in w) for j in candidates])
+            weights = np.exp((scores - scores.max()) / tau)
+            target = self.random.choices(candidates, weights=weights.tolist(), k=1)[0]
+            if target != here:
+                self.move_agent_to(a, target)
 
     def get_neighbors(self, element_id):
         """
@@ -551,72 +547,27 @@ class DomainModel(Model):
         raise ValueError(f"No matching element found for centroid {target_centroid}")
 
     def step(self):
-        """Perform one simulation step."""
-        if self.time % 1 == 0:
-            self.update_debris_field()
-            self.update_cytokine_fields()
-            self.update_oxygen_field()
+        """One global step of DT_HOURS (Methods Box 1)."""
+        if self.enable_EC:
+            self.element_EC_counts = {
+                eid: sum(1 for a in agents if isinstance(a, EndothelialCellAgent))
+                for eid, agents in self.element_agents.items()
+            }
+        else:
+            self.element_EC_counts = {eid: 0 for eid in self.elements.keys()}
+        self.update_oxygen_field()
 
-                    # NEW: Pre-calculate EC counts per element (saves recalculating for each agent)
-            if self.enable_EC:
-                self.element_EC_counts = {
-                    eid: sum(1 for a in agents if isinstance(a, EndothelialCellAgent))
-                    for eid, agents in self.element_agents.items()
-                }
-            else:
-                self.element_EC_counts = {eid: 0 for eid in self.elements.keys()}
-
-            # DEBUG LOOP HERE (if debug and time % 8)
-
-            self.perform_migration()
-            self.schedule.step()
-
-
-
-            if self.debug and self.time % 8 == 0:
-                max_polarization_M0_M1 = 0
-                max_polarization_M0_M2 = 0
-                max_polarization_M1_M2 = 0
-                max_dM0_dt = 0
-                max_dM1_dt = 0
-                max_dM2_dt = 0
-                max_dD_dt = 0
-
-                for agent in self.schedule.agents:
-                    if not isinstance(agent, ElementAgent):
-                        continue
-                    element_id = agent.element_id
-
-                    if self.enable_EC:
-                        EC = sum(1 for a in self.element_agents[element_id] if isinstance(a, EndothelialCellAgent))
-                    else:
-                        EC = 0
-
-                    D = self.debris_field[element_id]
-                    PO2 = self.oxygen_field[element_id]
-                    variables = agent.state
-
-                    dPMN_dt, dM0_dt, dM1_dt, dM2_dt, _, _, _, _, _ = full_bone_healing_model(0, variables, self.params, D, EC, PO2)
-                    P_M0_to_M1 = self.params["k01"] * (variables[5] / (self.params["a01"] + variables[5]))
-                    P_M0_to_M2 = self.params["k02"] * (variables[6] / (self.params["a02"] + variables[6]))
-                    P_M1_to_M2 = self.params["k12"] * (variables[6] / (self.params["a_M1_to_M2"] + variables[6]))
-
-                    max_polarization_M0_M1 = max(max_polarization_M0_M1, P_M0_to_M1)
-                    max_polarization_M0_M2 = max(max_polarization_M0_M2, P_M0_to_M2)
-                    max_polarization_M1_M2 = max(max_polarization_M1_M2, P_M1_to_M2)
-                    max_dM0_dt = max(max_dM0_dt, dM0_dt)
-                    max_dM1_dt = max(max_dM1_dt, dM1_dt)
-                    max_dM2_dt = max(max_dM2_dt, dM2_dt)
-
-                print(
-                    f"Iteration {self.time}: Max P_M0->M1: {max_polarization_M0_M1:.5f}, "
-                    f"Max P_M0->M2: {max_polarization_M0_M2:.5f}, Max P_M1->M2: {max_polarization_M1_M2:.5f}, "
-                    f"Max dM0/dt: {max_dM0_dt:.5f}, Max dM1/dt: {max_dM1_dt:.5f}, "
-                    f"Max dM2/dt: {max_dM2_dt:.5f}, Max dD/dt: {max_dD_dt:.5f}"
-                )
-
-
-
+        # 2-3. reaction and transport (Lie splitting). n_split > 1 alternates them n times per hour
+        # with dt = 1/n h; used only for the splitting-error test (Methods 5.6.3). Default 1.
+        n_split = int(self.params.get("n_split", 1))
+        for _ in range(n_split):
+            self.react(DT_HOURS / n_split)      # element-local reaction (cells, cytokines, debris)
+            self.transport(DT_HOURS / n_split)  # cytokine transport
+        self.mirror_fields_to_parcels()
+        self.population_totals = np.sum(
+            [a.state for a in self.schedule.agents if isinstance(a, ElementAgent)], axis=0)
+        self.schedule.step()              # 4a. parcel events in random order: budding (ElementAgent.step)
+        self.migrate_parcels()            # 4b. chemotaxis in random order
 
         VEGF_THRESHOLD = 0.01
         PRUNING_DELAY = 6

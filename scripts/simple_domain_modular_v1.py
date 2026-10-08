@@ -25,8 +25,8 @@ from domain_model import DomainModel
 # Simulation Functions
 # =====================================================
 
-def run_to_targets(nodes, elements, params, targets=(72, 120), disable_EC=True):
-    model = DomainModel(nodes, elements, params)
+def run_to_targets(nodes, elements, params, targets=(72, 120), disable_EC=True, seed=None):
+    model = DomainModel(nodes, elements, params, seed=seed)
 
     if hasattr(model, "debug"):
         model.debug = False
@@ -51,11 +51,12 @@ def run_and_save_all_outputs(
     max_hours=120,
     disable_EC=True,
     output_file="simulation_outputs.csv",
-    verbose=False
+    verbose=False,
+    seed=None
 ):
     from element_agent_optimized import ElementAgent
 
-    model = DomainModel(nodes, elements, params)
+    model = DomainModel(nodes, elements, params, seed=seed)
 
     if hasattr(model, "debug"):
         model.debug = False
@@ -218,6 +219,15 @@ def load_params_or_die(params_json_path: str | None, defaults: dict) -> dict:
 
         # NEW debris scaling coefficient
         "debris_coeff": 1.0,
+
+        # Numerical parameters of the agent layer (Methods 5.5)
+        "chemotaxis_beta_N": 0.6,
+        "chemotaxis_beta_0": 1.0,
+        "chemotaxis_tau": 0.05,
+        "max_parcels_per_element": 3,
+        "init_MSC_layout": 0,
+        "init_MSC_periosteal_parcels": 10,
+        "n_split": 1,
     }
 
     if params_json_path is None:
@@ -331,6 +341,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed; the same seed reproduces a run exactly (default: unseeded)"
+    )
+
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Print simulation outputs at every hour"
@@ -375,7 +392,8 @@ def main():
         max_hours=120,
         disable_EC=True,
         output_file=output_csv_path,
-        verbose=args.verbose
+        verbose=args.verbose,
+        seed=args.seed
     )
 
     total_time = time.perf_counter() - start_time

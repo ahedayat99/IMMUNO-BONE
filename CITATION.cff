@@ -1,8 +1,10 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "IMMUNO-BONE: A Multi-scale Computational Framework to Simulate the Immune-mediated Inflammatory Response in Murine Early Bone Fracture Healing"
-version: v1.0.0
-date-released: 2026-07-25
+version: v2.0.0
+date-released: 2026-10-07
+doi: 10.5281/zenodo.21567254
+repository-code: "https://github.com/ahedayat99/IMMUNO-BONE"
 authors:
   - family-names: "Hedayatzadeh Razavi"
     given-names: "Ahmad"

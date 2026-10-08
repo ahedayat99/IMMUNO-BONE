@@ -45,7 +45,7 @@ def full_bone_healing_model(t, variables, params, D, EC=0, PO2=0.0):
     a12, a22, a33 = params["a12"], params["a22"], params["a33"]
     K_lm = params["K_lm"]
 
-    # Polarization probabilities
+    # Polarization transfer rates (h^-1): Hill functions of Trejo et al. 2019, also used in COMMBINI (Borgiani et al. 2023)
     P_M0_to_M1 = k_M0_to_M1 * (c1 / (a_M0_to_M1 + c1))
     P_M0_to_M2 = k_M0_to_M2 * (c2 / (a_M0_to_M2 + c2))
     P_M1_to_M2 = k_M1_to_M2 * (c2 / (a_M1_to_M2 + c2))
@@ -77,7 +77,8 @@ def full_bone_healing_model(t, variables, params, D, EC=0, PO2=0.0):
         k_m1 * M1 +
         k_m0 * M0 +
         k_cm * Cm
-    ) - d_c4 * c4 - d_c4_ec * EC
-    dCm_dt = A_m * Cm * (1 - Cm / K_lm) + F1 * Cm
+    ) - d_c4 * c4 - d_c4_ec * EC * c4  # EC uptake proportional to VEGF (Zhang et al. 2021, Eq. 6)
+    # MSC: logistic proliferation minus differentiation (loss), Trejo et al. 2019 (AIP) Eq. 8
+    dCm_dt = A_m * Cm * (1 - Cm / K_lm) - F1 * Cm
 
     return [dPMN_dt, dM0_dt, dM1_dt, dM2_dt, dc1_dt, dc2_dt, dc3_dt, dCm_dt, dc4_dt]

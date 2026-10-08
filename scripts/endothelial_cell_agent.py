@@ -12,7 +12,7 @@ class EndothelialCellAgent(Agent):
         self.element_id = element_id
         self.centroid = centroid
         self.sprout_path = [centroid]
-        self.persistence = np.random.rand()
+        self.persistence = self.random.random()
         self.prev_direction = np.array([1.0, 0.0])
 
     def step(self):
@@ -48,7 +48,7 @@ class EndothelialCellAgent(Agent):
             return
 
         probabilities = [w / total_weight for w in weights]
-        selected_idx = np.random.choice(len(candidate_neighbors), p=probabilities)
+        selected_idx = self.random.choices(range(len(candidate_neighbors)), weights=probabilities, k=1)[0]
 
         chosen_element = candidate_neighbors[selected_idx]
         chosen_vector = direction_vectors[selected_idx]
@@ -71,7 +71,7 @@ class EndothelialCellAgent(Agent):
             self.model.vessel_element_ids.add(self.element_id)
 
         # 1. Stochastic branching
-        if np.random.rand() < 0.05 and len(self.sprout_path) > 2:
+        if self.random.random() < 0.05 and len(self.sprout_path) > 2:
             branch_target = self.model.find_branch_location(self.element_id)
             if branch_target:
                 new_id = f"{self.unique_id}_branch_{self.model.time}"

@@ -35,3 +35,8 @@ output/*.csv
 *.o[0-9]*
 *.e[0-9]*
 slurm-*.out
+
+# v2 working artefacts (generated outputs and cluster transfer packages)
+*.zip
+scc_round*_update/
+out/
