@@ -12,7 +12,7 @@ This repository contains the full implementation of the IMMUNO-BONE model — a 
 - **Equations:** the fibrogenic term F1 enters with a negative sign, and VEGF has a sink proportional to its concentration (see the manuscript Methods).
 - **Initial conditions:** progenitor (MSC) layout switch `init_MSC_layout` (0 = gap, 1 = periosteal, 2 = half periosteal / half gap; the model of record uses 2).
 - **Recalibration:** joint calibration to the immunofluorescence macrophage ratios and the dPCR cytokine fold-changes, with literature-derived parameters kept inside their published ranges → `params/model_of_record.json`.
-- **Reproducibility:** explicit random seeds (`--seed`), analysis and verification tools in `tools/`, and a reference record in `tests/golden/`.
+- **Reproducibility:** explicit random seeds (`--seed`).
 
 ---
 
@@ -21,15 +21,9 @@ This repository contains the full implementation of the IMMUNO-BONE model — a 
 ```
 .
 ├── data/
-│   ├── node_elements.txt          # FE mesh geometry (nodes + elements) of the callus
-│   └── input_params.json          # Published v1 parameter values (diffusion converted to mm²/h)
+│   └── node_elements.txt          # FE mesh geometry (nodes + elements) of the callus
 ├── params/
-│   ├── model_of_record.json       # Calibrated parameter set used for all reported v2 results
-│   ├── calibration_bounds.json    # Search bounds for calibration
-│   ├── round2/                    # Calibration variants (layouts, leave-one-cytokine-out)
-│   ├── round3/                    # Robustness variants (TNF-α decay / neutrophil lifespan in literature range)
-│   ├── selected_v2/, option_A/, option_B/   # Intermediate base points (SA base, calibration starts)
-│   └── v1_*.json                  # v1 parameter sets for comparison
+│   └── model_of_record.json       # Calibrated parameter set used for all reported results
 ├── scripts/
 │   ├── simple_domain_modular_v1.py      # Main entry point — run this
 │   ├── domain_model.py                  # Mesa Model: domain setup, reaction/transport/migration scheduling
@@ -42,11 +36,9 @@ This repository contains the full implementation of the IMMUNO-BONE model — a 
 │   ├── endothelial_cell_agent.py        # Endothelial cell agent
 │   ├── neighbor_cache_patch.py          # Neighbor-lookup optimization
 │   └── utils.py                         # Mesh parsing utilities
-├── tools/                         # Harness, sensitivity analysis, calibration, analysis suite, figures, verification
-├── scc/                           # Batch scripts for the Boston University SCC cluster (SGE)
-├── tests/golden/                  # Reference records for regression checks
 ├── environment.yml                # Conda environment specification
 ├── LICENSE                        # MIT License
+├── CITATION.cff
 └── README.md
 ```
 
@@ -98,26 +90,6 @@ Add `--verbose` to print the hourly state. The reported results are means over t
 | `--seed` | Random seed; the same seed reproduces a run exactly | Unseeded |
 | `--verbose` | Print hourly progress to stdout | Off |
 
-### Reproducing the reported quantities
-
-```bash
-# All manuscript quantities (calibration ratios, cytokine folds, zones, parcels) for one seed, as JSON
-python tools/harness.py --params params/model_of_record.json --seed 11000
-
-# Check against the reference record (expected: max relative difference 0)
-python tools/harness.py --params params/model_of_record.json --seed 11000 > /tmp/check.jsonl
-python tools/compare_exact.py tests/golden/v2_model_of_record.jsonl /tmp/check.jsonl
-
-# Baseline time courses and perturbation scenarios (10 seeds each), then summary statistics
-python tools/run_final_suite.py --params params/model_of_record.json --out out/final --workers 8
-python tools/analyze_final.py
-
-# Numerical verification of the transport and reaction operators
-python tools/transport_verification.py
-```
-
-Other tools: `oat_sa.py` (one-at-a-time sensitivity analysis), `calibrate.py` (LHS + differential evolution), `timecourse.py` (full per-seed time course), `parcel_composition.py`, `capacity_check.py`, `mesh_refinement_test.py`, and `make_figures.py` / `fig_sa.py` / `supp_figs.py` (figures). Each script documents its usage in its header. Cluster workflows are described in `scc/README_SCC.md`, `scc/README_ROUND2.md` and `scc/README_ROUND3.md`.
-
 ---
 
 ## Input Files
@@ -126,9 +98,9 @@ Other tools: `oat_sa.py` (one-at-a-time sensitivity analysis), `calibrate.py` (L
 
 An Abaqus-format mesh file defining the 2D callus geometry (3,242 eight-node quadrilaterals): the osteotomy gap and the periosteal callus in front of the far cortex. Coordinates are in mm, origin at the centre of the gap; x is perpendicular to the fixation plate and y runs along the bone axis.
 
-### Parameter files
+### `params/model_of_record.json`
 
-JSON dictionaries of kinetic and rate parameters governing cell recruitment, polarization, apoptosis, and cytokine production/degradation/diffusion (rates per hour). Parameters missing from a file take the built-in defaults defined in `simple_domain_modular_v1.py`.
+The calibrated parameter set: kinetic and rate parameters governing cell recruitment, polarization, apoptosis, and cytokine production/degradation/diffusion (rates per hour). Parameters missing from a file take the built-in defaults defined in `simple_domain_modular_v1.py`.
 
 ---
 
